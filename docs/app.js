@@ -1,6 +1,5 @@
 (() => {
   const apiBase = (document.querySelector('meta[name="api-base"]')?.content || "").replace(/\/+$/, "");
-  const sitesBypass = document.querySelector('meta[name="sites-bypass"]')?.content || "";
   const $ = (selector) => document.querySelector(selector);
   const views = [...document.querySelectorAll(".view")];
   let token = sessionStorage.getItem("vacationSurveyToken") || "";
@@ -22,7 +21,6 @@
 
   async function request(path, options = {}) {
     const headers = { "content-type": "application/json", ...(options.headers || {}) };
-    if (sitesBypass) headers["OAI-Sites-Authorization"] = `Bearer ${sitesBypass}`;
     if (token) headers.authorization = `Bearer ${token}`;
     const response = await fetch(`${apiBase}${path}`, { ...options, headers });
     const body = await response.json().catch(() => ({}));
