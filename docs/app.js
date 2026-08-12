@@ -6,6 +6,9 @@
   let role = sessionStorage.getItem("vacationSurveyRole") || "";
   let residentNames = [];
   let currentResident = null;
+  let currentRankOptions = [];
+  let currentVacationMode = "";
+  let currentExistingResponse = null;
   let responses = [];
 
   function showView(id) {
@@ -59,8 +62,10 @@
     );
   }
 
-  function buildRankFields(options, priorChoices = []) {
-    const count = Math.min(5, options.length);
+  function buildRankFields(options, priorChoices = [], settings = {}) {
+    const count = Math.min(settings.maximum || 5, options.length);
+    const requiredCount = Math.min(settings.required || 3, count);
+    const placeholder = settings.placeholder || "Select a week";
     $("#rank-fields").replaceChildren(
       ...Array.from({ length: count }, (_, index) => {
         const wrapper = document.createElement("div");
@@ -71,20 +76,20 @@
         const content = document.createElement("div");
         const label = document.createElement("label");
         label.htmlFor = `rank-${index + 1}`;
-        label.textContent = index < 3 ? `Choice ${index + 1} · required` : `Choice ${index + 1} · optional`;
+        label.textContent = index < requiredCount ? `Choice ${index + 1} · required` : `Choice ${index + 1} · optional`;
         const select = document.createElement("select");
         select.id = `rank-${index + 1}`;
         select.dataset.rank = String(index + 1);
-        select.required = index < Math.min(3, count);
+        select.required = index < requiredCount;
         const blank = document.createElement("option");
         blank.value = "";
-        blank.textContent = "Select a week";
+        blank.textContent = placeholder;
         select.append(blank);
         for (const option of options) {
           const item = document.createElement("option");
           item.value = option.id;
           item.textContent = option.label;
-          if (priorChoices[index]?.optionId === option.id) item.selected = true;
+          if ((priorChoices[index]?.optionId || priorChoices[index]?.id) === option.id) item.selected = true;
           select.append(item);
         }
         select.addEventListener("change", preventDuplicateChoices);
@@ -105,23 +110,80 @@
     });
   }
 
+  function inferredSarMode(existingResponse) {
+    if (["holiday", "elective"].includes(existingResponse?.vacationMode)) return existingResponse.vacationMode;
+    if (existingResponse?.choices?.some((choice) => choice.type === "Extra vacation week (holiday block)")) return "holiday";
+    return existingResponse?.choices?.length ? "elective" : "";
+  }
+
+  function renderSarMode(mode) {
+    currentVacationMode = mode;
+    document.querySelectorAll('input[name="sar-vacation-mode"]').forEach((radio) => {
+      radio.checked = radio.value === mode;
+    });
+    const existingChoices = currentExistingResponse?.vacationMode === mode
+      ? currentExistingResponse.choices || []
+      : [];
+    if (mode === "holiday") {
+      currentRankOptions = currentResident.holidayCombinations || [];
+      $("#preference-heading").textContent = "Rank your holiday block combinations";
+      $("#option-count").textContent = `${currentRankOptions.length} combinations`;
+      $("#ranking-instructions").textContent = "Rank all three combinations from most to least preferred.";
+      buildRankFields(currentRankOptions, existingChoices, {
+        maximum: 3,
+        required: 3,
+        placeholder: "Select a holiday combination",
+      });
+    } else if (mode === "elective") {
+      currentRankOptions = currentResident.electiveOptions || [];
+      $("#preference-heading").textContent = "Your top elective vacation weeks";
+      $("#option-count").textContent = `${currentRankOptions.length} available`;
+      $("#ranking-instructions").textContent = currentRankOptions.length
+        ? "Choices 1–3 are required. Each elective week can only be selected once."
+        : "No eligible elective weeks remain under the current rules. You may still submit scheduling context for the chiefs.";
+      buildRankFields(currentRankOptions, existingChoices);
+    } else {
+      currentRankOptions = [];
+      $("#preference-heading").textContent = "Choose your vacation type";
+      $("#option-count").textContent = "Choose one";
+      $("#ranking-instructions").textContent = "Select holiday block or elective above to see the choices you can rank.";
+      $("#rank-fields").replaceChildren();
+    }
+  }
+
   async function loadResident(name) {
     const data = await request(`/api/options?name=${encodeURIComponent(name)}`);
     currentResident = data.resident;
+    currentExistingResponse = data.existingResponse || null;
+    currentVacationMode = "";
     $("#survey-title").textContent = `${currentResident.name}, rank your weeks`;
-    $("#survey-subtitle").textContent = `${currentResident.level} · ${currentResident.options.length} eligible option${currentResident.options.length === 1 ? "" : "s"}`;
-    $("#option-count").textContent = `${currentResident.options.length} available`;
-    buildRankFields(currentResident.options, data.existingResponse?.choices || []);
-    $(".preference-card .muted").textContent = currentResident.options.length
-      ? "Choices 1–3 are required. Each week can only be selected once."
-      : "No eligible weeks remain under the current rules. You may still submit scheduling context for the chiefs.";
-    $("#comments").value = data.existingResponse?.comment || "";
-    $("#flexible").checked = Boolean(data.existingResponse?.flexible);
+    $("#comments").value = currentExistingResponse?.comment || "";
+    $("#flexible").checked = Boolean(currentExistingResponse?.flexible);
+    const isSar = currentResident.level === "SARs";
+    $("#sar-vacation-mode").classList.toggle("hidden", !isSar);
+    $("#sar-mode-note").textContent = "";
+    if (isSar) {
+      $("#survey-subtitle").textContent = "SARs · choose holiday block or elective vacation";
+      const mode = inferredSarMode(currentExistingResponse);
+      if (mode === "holiday" && currentExistingResponse && !currentExistingResponse.vacationMode) {
+        $("#sar-mode-note").textContent = "Your earlier holiday-week response remains saved. Rank the new holiday combinations if you choose to update it.";
+      }
+      renderSarMode(mode);
+    } else {
+      currentRankOptions = currentResident.options;
+      $("#survey-subtitle").textContent = `${currentResident.level} · ${currentRankOptions.length} eligible option${currentRankOptions.length === 1 ? "" : "s"}`;
+      $("#preference-heading").textContent = "Your top vacation weeks";
+      $("#option-count").textContent = `${currentRankOptions.length} available`;
+      $("#ranking-instructions").textContent = currentRankOptions.length
+        ? "Choices 1–3 are required. Each week can only be selected once."
+        : "No eligible weeks remain under the current rules. You may still submit scheduling context for the chiefs.";
+      buildRankFields(currentRankOptions, currentExistingResponse?.choices || []);
+    }
     showView("survey-view");
   }
 
   function choiceRows() {
-    const byId = new Map(currentResident.options.map((option) => [option.id, option]));
+    const byId = new Map(currentRankOptions.map((option) => [option.id, option]));
     return [...document.querySelectorAll("[data-rank]")]
       .filter((select) => select.value)
       .map((select) => ({
@@ -133,12 +195,12 @@
 
   function renderMetrics(filtered) {
     const submitted = new Set(filtered.map((response) => response.residentName)).size;
-    const firstChoices = new Set(filtered.map((response) => response.choices?.[0]?.optionId).filter(Boolean)).size;
+    const firstChoices = new Set(filtered.map((response) => response.choices?.[0]?.optionId || response.choices?.[0]?.id).filter(Boolean)).size;
     const flexible = filtered.filter((response) => response.flexible).length;
     const comments = filtered.filter((response) => response.comment).length;
     const values = [
       ["Residents responded", submitted],
-      ["Unique first-choice weeks", firstChoices],
+      ["Unique first choices", firstChoices],
       ["Flexible responses", flexible],
       ["Responses with context", comments],
     ];
@@ -156,10 +218,11 @@
     const demand = new Map();
     filtered.forEach((response) =>
       (response.choices || []).forEach((choice) => {
-        const item = demand.get(choice.optionId) || { label: choice.label, score: 0, first: 0 };
+        const choiceId = choice.optionId || choice.id;
+        const item = demand.get(choiceId) || { label: choice.label, score: 0, first: 0 };
         item.score += 6 - choice.rank;
         if (choice.rank === 1) item.first += 1;
-        demand.set(choice.optionId, item);
+        demand.set(choiceId, item);
       }),
     );
     const ranked = [...demand.values()].sort((a, b) => b.score - a.score || b.first - a.first).slice(0, 10);
@@ -186,6 +249,7 @@
       const matchesLevel = !level || response.trainingLevel === level;
       const haystack = [
         response.residentName,
+        response.vacationMode,
         response.comment,
         ...(response.choices || []).map((choice) => choice.label),
       ].join(" ").toLowerCase();
@@ -203,6 +267,7 @@
         row.innerHTML = `
           <td><strong>${escapeHtml(response.residentName)}</strong></td>
           <td>${escapeHtml(response.trainingLevel)}</td>
+          <td>${response.trainingLevel === "SARs" ? escapeHtml(response.vacationMode === "holiday" ? "Holiday block" : response.vacationMode === "elective" ? "Elective" : "Earlier response") : "—"}</td>
           <td>${escapeHtml(submitted)}</td>
           <td><ol class="choice-list">${(response.choices || []).map((choice) => `<li>${escapeHtml(choice.label)}</li>`).join("")}</ol></td>
           <td>${response.flexible ? "Yes" : "No"}</td>
@@ -251,12 +316,13 @@
   }
 
   function downloadCsv() {
-    const headers = ["Resident", "Level", "Submitted At", "Rank", "Rotation", "Block", "Week Start", "Week End", "Option", "Flexible", "Comment"];
+    const headers = ["Resident", "Level", "Vacation Type", "Submitted At", "Rank", "Rotation", "Block", "Week Start", "Week End", "Option", "Flexible", "Comment"];
     const rows = [headers];
     filteredResponses().forEach((response) => {
       (response.choices || []).forEach((choice) => rows.push([
         response.residentName,
         response.trainingLevel,
+        response.trainingLevel === "SARs" ? response.vacationMode || "Earlier response" : "",
         response.submittedAt,
         choice.rank,
         choice.rotation,
@@ -327,8 +393,12 @@
 
   $("#survey-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (currentResident.level === "SARs" && !currentVacationMode) {
+      setStatus("#survey-status", "Please choose holiday block or elective vacation.");
+      return;
+    }
     const choices = choiceRows();
-    if (choices.length < Math.min(3, currentResident.options.length)) {
+    if (choices.length < Math.min(3, currentRankOptions.length)) {
       setStatus("#survey-status", "Please complete your required rankings.");
       return;
     }
@@ -338,6 +408,7 @@
         method: "POST",
         body: JSON.stringify({
           residentName: currentResident.name,
+          ...(currentResident.level === "SARs" ? { vacationMode: currentVacationMode } : {}),
           choices: choices.map(({ rank, optionId }) => ({ rank, optionId })),
           comment: $("#comments").value.trim(),
           flexible: $("#flexible").checked,
@@ -352,6 +423,13 @@
 
   $("#change-resident").addEventListener("click", () => showView("resident-view"));
   $("#edit-response").addEventListener("click", () => loadResident(currentResident.name));
+  document.querySelectorAll('input[name="sar-vacation-mode"]').forEach((radio) => {
+    radio.addEventListener("change", () => {
+      $("#sar-mode-note").textContent = "";
+      setStatus("#survey-status", "");
+      renderSarMode(radio.value);
+    });
+  });
   document.querySelectorAll(".logout-button").forEach((button) => button.addEventListener("click", logout));
   $("#setup-repository").addEventListener("click", setupRepository);
   $("#refresh-admin").addEventListener("click", loadAdmin);
