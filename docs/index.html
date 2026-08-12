@@ -94,11 +94,27 @@
             <div class="card-heading">
               <div>
                 <p class="kicker">Preference ranking</p>
-                <h2>Your top vacation weeks</h2>
+                <h2 id="preference-heading">Your top vacation weeks</h2>
               </div>
               <span id="option-count" class="count-pill"></span>
             </div>
-            <p class="muted">
+            <div id="sar-vacation-mode" class="sar-mode-panel hidden">
+              <fieldset>
+                <legend>Would you rather use your vacation on your holiday block or elective?</legend>
+                <div class="mode-options">
+                  <label class="mode-option">
+                    <input type="radio" name="sar-vacation-mode" value="holiday" />
+                    <span><strong>Holiday block</strong><small>Rank the three two-holiday combinations.</small></span>
+                  </label>
+                  <label class="mode-option">
+                    <input type="radio" name="sar-vacation-mode" value="elective" />
+                    <span><strong>Elective</strong><small>Rank eligible elective weeks from your schedule.</small></span>
+                  </label>
+                </div>
+                <p id="sar-mode-note" class="muted"></p>
+              </fieldset>
+            </div>
+            <p id="ranking-instructions" class="muted">
               Choices 1–3 are required. Each week can only be selected once.
             </p>
             <div id="rank-fields" class="rank-fields"></div>
@@ -188,6 +204,7 @@
                 <tr>
                   <th>Resident</th>
                   <th>Level</th>
+                  <th>Vacation type</th>
                   <th>Submitted</th>
                   <th>Ranked choices</th>
                   <th>Flexible</th>
